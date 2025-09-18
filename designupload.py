@@ -24,7 +24,9 @@ def main():
     # --- Helper Functions ---
     def upload_image(file_obj):
         url = "https://api.printify.com/v1/uploads/images.json"
-        files = {"file": (file_obj.name, file_obj.getvalue(), file_obj.type)}
+        # Explicit MIME type
+        mime_type = "image/png" if file_obj.name.lower().endswith(".png") else "image/jpeg"
+        files = {"file": (file_obj.name, file_obj.getvalue(), mime_type)}
         resp = requests.post(url, headers={"Authorization": f"Bearer {api_token}"}, files=files)
         resp.raise_for_status()
         return resp.json()["id"]
@@ -106,6 +108,8 @@ def main():
 
                     st.success(f"✅ {product_title} published! Product ID: {product_id}")
 
+                except requests.exceptions.HTTPError as e:
+                    st.error(f"❌ HTTP error for {file_obj.name}: {e.response.text}")
                 except Exception as e:
                     st.error(f"❌ Error processing {file_obj.name}: {e}")
 
