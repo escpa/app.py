@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Fixed with Variants)")
+    st.title("📦 Gildan 64000 Printify Uploader (Printify Choice, No Variants)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -15,7 +15,7 @@ def main():
     )
     markup = st.number_input("Markup in cents (e.g. 1000 = $10)", min_value=0, value=1000)
 
-    # --- Hardcoded Gildan 64000 Blueprint ---
+    # --- Hardcoded blueprint and provider ---
     BLUEPRINT_ID = 145  # Gildan 64000
     PROVIDER_ID = 0     # Printify Choice
 
@@ -41,11 +41,11 @@ def main():
         resp.raise_for_status()
         return resp.json()["id"]
 
-    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id, variant_ids):
-        """Create Printify product with variants and print area."""
+    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id):
+        """Create product using Printify Choice (no variants)."""
         print_areas = [
             {
-                "variant_ids": variant_ids,
+                "variant_ids": [],  # leave empty for Printify Choice
                 "placeholders": [
                     {
                         "position": "front",
@@ -54,18 +54,16 @@ def main():
                 ]
             }
         ]
-        variants = [{"id": vid, "price": 0} for vid in variant_ids]  # price will be updated later
-        url = f"https://api.printify.com/v1/shops/{shop_id}/products.json"
         body = {
             "title": title,
             "description": description,
             "blueprint_id": blueprint_id,
             "print_provider_id": provider_id,
-            "variants": variants,
+            "variants": [],  # no variants required for Printify Choice
             "print_areas": print_areas
         }
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
-        resp = requests.post(url, headers=headers, json=body)
+        resp = requests.post(f"https://api.printify.com/v1/shops/{shop_id}/products.json", headers=headers, json=body)
         resp.raise_for_status()
         return resp.json()
 
@@ -81,74 +79,56 @@ def main():
     if st.button("Upload & Publish"):
         if not api_token or not uploaded_files:
             st.error("Please enter API token and upload at least one design.")
-        else:
-            try:
-                shop_id = get_shop_id()
-                if not shop_id:
-                    st.stop()
+            st.stop()
 
-                # --- Fetch blueprint variants ---
-                headers = {"Authorization": f"Bearer {api_token}"}
-                bp_resp = requests.get(f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}.json", headers=headers)
-                bp_resp.raise_for_status()
-                blueprint_data = bp_resp.json()
-                variants = blueprint_data.get("variants", [])
-                enabled_variants = [v for v in variants if v.get("enabled", False)]
-                if not enabled_variants:
-                    st.error("No enabled variants found for this blueprint.")
-                    st.stop()
-
-                # --- Color Selection ---
-                variant_options = {v["title"]: v for v in enabled_variants}  # title -> variant
-                color_input = st.text_input(
-                    "Enter desired colors (for reference in product description, e.g. Red, Black, White)",
-                    value="White"
-                )
-                selected_colors = [c.strip() for c in color_input.split(",") if c.strip()]
-                if not selected_colors:
-                    st.error("Please enter at least one color.")
-                    st.stop()
-
-                # Filter variants by selected colors (best-effort)
-                variant_ids = [v["id"] for title, v in variant_options.items() if any(color.lower() in title.lower() for color in selected_colors)]
-                if not variant_ids:
-                    st.warning("No variants exactly match the selected colors; using all enabled variants.")
-                    variant_ids = [v["id"] for v in enabled_variants]
-
-            except requests.exceptions.HTTPError as e:
-                st.error(f"❌ Error fetching shop or blueprint: {e.response.text}")
+        try:
+            shop_id = get_shop_id()
+            if not shop_id:
                 st.stop()
 
-            # --- Upload & Create Products ---
-            for file_obj in uploaded_files:
-                try:
-                    st.info(f"Uploading {file_obj.name}...")
-                    image_id = upload_image(file_obj)
+            # --- User enters colors for reference ---
+            color_input = st.text_input(
+                "Enter desired colors (for reference in product description, e.g. Red, Black, White)",
+                value="White"
+            )
+            selected_colors = [c.strip() for c in color_input.split(",") if c.strip()]
+            if not selected_colors:
+                st.error("Please enter at least one color.")
+                st.stop()
 
-                    product_title = os.path.splitext(file_obj.name)[0]
-                    product_description = f"High-quality Gildan 64000 tee. Selected colors: {', '.join(selected_colors)}"
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ Error fetching shop: {e.response.text}")
+            st.stop()
 
-                    st.info(f"Creating product: {product_title}...")
-                    product = create_product(
-                        shop_id,
-                        BLUEPRINT_ID,
-                        PROVIDER_ID,
-                        f"{product_title} - Gildan 64000",
-                        product_description,
-                        image_id,
-                        variant_ids
-                    )
-                    product_id = product["id"]
+        # --- Upload & Create Products ---
+        for file_obj in uploaded_files:
+            try:
+                st.info(f"Uploading {file_obj.name}...")
+                image_id = upload_image(file_obj)
 
-                    st.info(f"Publishing product: {product_title}...")
-                    publish_product(shop_id, product_id)
+                product_title = os.path.splitext(file_obj.name)[0]
+                product_description = f"High-quality Gildan 64000 tee. Selected colors: {', '.join(selected_colors)}"
 
-                    st.success(f"✅ {product_title} published! Product ID: {product_id}")
+                st.info(f"Creating product: {product_title}...")
+                product = create_product(
+                    shop_id,
+                    BLUEPRINT_ID,
+                    PROVIDER_ID,
+                    f"{product_title} - Gildan 64000",
+                    product_description,
+                    image_id
+                )
+                product_id = product["id"]
 
-                except requests.exceptions.HTTPError as e:
-                    st.error(f"❌ HTTP error for {file_obj.name}: {e.response.text}")
-                except Exception as e:
-                    st.error(f"❌ Error processing {file_obj.name}: {e}")
+                st.info(f"Publishing product: {product_title}...")
+                publish_product(shop_id, product_id)
+
+                st.success(f"✅ {product_title} published! Product ID: {product_id}")
+
+            except requests.exceptions.HTTPError as e:
+                st.error(f"❌ HTTP error for {file_obj.name}: {e.response.text}")
+            except Exception as e:
+                st.error(f"❌ Error processing {file_obj.name}: {e}")
 
 if __name__ == "__main__":
     main()
