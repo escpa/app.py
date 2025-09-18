@@ -1,4 +1,5 @@
 import os
+import base64
 import requests
 import streamlit as st
 
@@ -24,14 +25,20 @@ def main():
     # --- Helper Functions ---
     def upload_image(file_obj):
         """
-        Uploads an image to Printify correctly using multipart/form-data.
+        Uploads an image to Printify using base64 encoding.
         """
         url = "https://api.printify.com/v1/uploads/images.json"
         file_bytes = file_obj.read()
-        files = {
-            "file": (file_obj.name, file_bytes)
+        encoded = base64.b64encode(file_bytes).decode("utf-8")
+        payload = {
+            "file_name": file_obj.name,
+            "contents": encoded
         }
-        resp = requests.post(url, headers=HEADERS, files=files)
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json"
+        }
+        resp = requests.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         return resp.json()["id"]
 
@@ -119,4 +126,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
