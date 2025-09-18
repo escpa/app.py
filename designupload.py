@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (S–3XL)")
+    st.title("📦 Gildan 64000 Printify Uploader (S–3XL, $29.99 each)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -13,14 +13,12 @@ def main():
         type=["png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
-    markup = st.number_input("Markup in cents (e.g. 1000 = $10)", min_value=0, value=1000)
 
-    # --- Hardcoded blueprint and provider ---
+    # --- Hardcoded blueprint, provider, variants, price ---
     BLUEPRINT_ID = 145  # Gildan 64000
     PROVIDER_ID = 0     # Printify Choice
-
-    # --- Hardcoded variant IDs S → 3XL ---
     VARIANT_IDS = [401, 402, 403, 404, 405, 406]  # S, M, L, XL, 2XL, 3XL
+    VARIANT_PRICE = 2999  # cents = $29.99
 
     # --- Helper Functions ---
     def get_shop_id():
@@ -44,8 +42,8 @@ def main():
         resp.raise_for_status()
         return resp.json()["id"]
 
-    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id):
-        """Create product using Printify Choice with hardcoded S–3XL variants."""
+    def create_product(shop_id, title, description, image_id):
+        """Create product using Printify Choice with hardcoded S–3XL variants and fixed price."""
         print_areas = [
             {
                 "variant_ids": VARIANT_IDS,
@@ -57,12 +55,12 @@ def main():
                 ]
             }
         ]
-        variants = [{"id": vid, "price": 0} for vid in VARIANT_IDS]  # price updated later
+        variants = [{"id": vid, "price": VARIANT_PRICE} for vid in VARIANT_IDS]
         body = {
             "title": title,
             "description": description,
-            "blueprint_id": blueprint_id,
-            "print_provider_id": provider_id,
+            "blueprint_id": BLUEPRINT_ID,
+            "print_provider_id": PROVIDER_ID,
             "variants": variants,
             "print_areas": print_areas
         }
@@ -116,8 +114,6 @@ def main():
                 st.info(f"Creating product: {product_title}...")
                 product = create_product(
                     shop_id,
-                    BLUEPRINT_ID,
-                    PROVIDER_ID,
                     f"{product_title} - Gildan 64000",
                     product_description,
                     image_id
