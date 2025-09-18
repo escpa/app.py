@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Fixed & Hardcoded)")
+    st.title("📦 Gildan 64000 Printify Uploader (Printify Choice)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -17,6 +17,7 @@ def main():
 
     # --- Hardcoded Gildan 64000 Blueprint ---
     BLUEPRINT_ID = 145  # Gildan 64000
+    PROVIDER_ID = 0     # Printify Choice
 
     # --- Helper Functions ---
     def get_shop_id():
@@ -28,31 +29,6 @@ def main():
             st.error("No shops found for this API token.")
             return None
         return shops[0]["id"]
-
-    def get_valid_provider(blueprint_id):
-        """Select a provider with enabled variants, safely handling missing keys."""
-        headers = {"Authorization": f"Bearer {api_token}"}
-        resp = requests.get(
-            f"https://api.printify.com/v1/catalog/blueprints/{blueprint_id}/print_providers.json",
-            headers=headers
-        )
-        resp.raise_for_status()
-        providers = resp.json()
-        
-        for p in providers:
-            provider_resp = requests.get(
-                f"https://api.printify.com/v1/catalog/blueprints/{blueprint_id}/print_providers/{p['id']}.json",
-                headers=headers
-            ).json()
-            
-            variants = provider_resp.get("variants", [])
-            enabled_variants = [v for v in variants if v.get("enabled", False)]
-            
-            if enabled_variants:
-                return p["id"], enabled_variants
-        
-        st.error("No valid print providers found for Gildan 64000.")
-        return None, None
 
     def upload_image(file_obj):
         """Upload an image to Printify using base64."""
@@ -110,11 +86,19 @@ def main():
             st.error("Please enter API token and upload at least one design.")
         else:
             try:
+                # --- Shop ID ---
                 shop_id = get_shop_id()
                 if not shop_id:
                     st.stop()
-                provider_id, variants = get_valid_provider(BLUEPRINT_ID)
-                if not provider_id or not variants:
+
+                # --- Get blueprint variants ---
+                headers = {"Authorization": f"Bearer {api_token}"}
+                bp_resp = requests.get(f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}.json", headers=headers)
+                bp_resp.raise_for_status()
+                blueprint_data = bp_resp.json()
+                variants = blueprint_data.get("variants", [])
+                if not variants:
+                    st.error("No variants found for this blueprint.")
                     st.stop()
 
                 # --- Color Selection ---
@@ -131,9 +115,10 @@ def main():
                     st.stop()
 
             except requests.exceptions.HTTPError as e:
-                st.error(f"❌ Error fetching Shop ID or provider: {e.response.text}")
+                st.error(f"❌ Error fetching shop or blueprint: {e.response.text}")
                 st.stop()
 
+            # --- Upload & Create Products ---
             for file_obj in uploaded_files:
                 try:
                     st.info(f"Uploading {file_obj.name}...")
@@ -144,7 +129,7 @@ def main():
                     product = create_product(
                         shop_id,
                         BLUEPRINT_ID,
-                        provider_id,
+                        PROVIDER_ID,
                         f"{product_title} - Gildan 64000",
                         "High-quality Gildan 64000 tee with centered design.",
                         image_id,
