@@ -32,15 +32,19 @@ def main():
         return shops[0]["id"]
 
     def upload_image(file_obj):
-        """Upload an image to Printify using base64."""
-        url = "https://api.printify.com/v1/uploads/images.json"
-        file_bytes = file_obj.read()
-        encoded = base64.b64encode(file_bytes).decode("utf-8")
-        payload = {"file_name": file_obj.name, "contents": encoded}
-        headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
-        resp = requests.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        return resp.json()["id"]
+        """Safely upload an image to Printify using base64."""
+        try:
+            file_bytes = file_obj.read()
+            file_obj.seek(0)
+            encoded = base64.b64encode(file_bytes).decode("utf-8")
+            payload = {"file_name": file_obj.name, "contents": encoded}
+            headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+            resp = requests.post("https://api.printify.com/v1/uploads/images.json", headers=headers, json=payload)
+            resp.raise_for_status()
+            return resp.json()["id"]
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ HTTP error uploading {file_obj.name}: {e.response.text}")
+            return None
 
     def create_product(shop_id, title, description, image_id):
         """Create product using Printify Choice with hardcoded S–3XL variants and fixed price."""
@@ -107,6 +111,9 @@ def main():
             try:
                 st.info(f"Uploading {file_obj.name}...")
                 image_id = upload_image(file_obj)
+                if not image_id:
+                    st.warning(f"Skipping {file_obj.name} due to upload error.")
+                    continue
 
                 product_title = os.path.splitext(file_obj.name)[0]
                 product_description = f"High-quality Gildan 64000 tee. Selected colors: {', '.join(selected_colors)}"
