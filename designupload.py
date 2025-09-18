@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Hardcoded Blueprint)")
+    st.title("📦 Gildan 64000 Printify Uploader (Fixed & Hardcoded)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -30,7 +30,7 @@ def main():
         return shops[0]["id"]
 
     def get_valid_provider(blueprint_id):
-        """Select a provider with enabled variants."""
+        """Select a provider with enabled variants, safely handling missing keys."""
         headers = {"Authorization": f"Bearer {api_token}"}
         resp = requests.get(
             f"https://api.printify.com/v1/catalog/blueprints/{blueprint_id}/print_providers.json",
@@ -38,14 +38,19 @@ def main():
         )
         resp.raise_for_status()
         providers = resp.json()
+        
         for p in providers:
             provider_resp = requests.get(
                 f"https://api.printify.com/v1/catalog/blueprints/{blueprint_id}/print_providers/{p['id']}.json",
                 headers=headers
             ).json()
-            enabled_variants = [v for v in provider_resp["variants"] if v["enabled"]]
+            
+            variants = provider_resp.get("variants", [])
+            enabled_variants = [v for v in variants if v.get("enabled", False)]
+            
             if enabled_variants:
                 return p["id"], enabled_variants
+        
         st.error("No valid print providers found for Gildan 64000.")
         return None, None
 
