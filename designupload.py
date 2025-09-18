@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Printify Choice)")
+    st.title("📦 Gildan 64000 Printify Uploader (Printify Choice, No Variants)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -41,30 +41,29 @@ def main():
         resp.raise_for_status()
         return resp.json()["id"]
 
-    def build_print_area(image_id, variants):
+    def build_print_area(image_id):
+        """Create print area for Printify Choice."""
         return [
             {
-                "variant_ids": [v["id"] for v in variants],
+                "variant_ids": [],  # leave empty for Printify Choice
                 "placeholders": [
                     {
                         "position": "front",
-                        "images": [
-                            {"id": image_id, "x": 0.5, "y": 0.0, "scale": 0.9, "angle": 0}
-                        ]
+                        "images": [{"id": image_id, "x": 0.5, "y": 0.0, "scale": 0.9, "angle": 0}]
                     }
                 ]
             }
         ]
 
-    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id, variants):
-        print_areas = build_print_area(image_id, variants)
+    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id):
+        print_areas = build_print_area(image_id)
         url = f"https://api.printify.com/v1/shops/{shop_id}/products.json"
         body = {
             "title": title,
             "description": description,
             "blueprint_id": blueprint_id,
             "print_provider_id": provider_id,
-            "variants": [{"id": v["id"], "price": v["cost"] + markup} for v in variants],
+            "variants": [],  # no variants for Printify Choice
             "print_areas": print_areas
         }
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
@@ -86,36 +85,23 @@ def main():
             st.error("Please enter API token and upload at least one design.")
         else:
             try:
-                # --- Shop ID ---
                 shop_id = get_shop_id()
                 if not shop_id:
                     st.stop()
 
-                # --- Get blueprint variants ---
-                headers = {"Authorization": f"Bearer {api_token}"}
-                bp_resp = requests.get(f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}.json", headers=headers)
-                bp_resp.raise_for_status()
-                blueprint_data = bp_resp.json()
-                variants = blueprint_data.get("variants", [])
-                if not variants:
-                    st.error("No variants found for this blueprint.")
-                    st.stop()
-
                 # --- Color Selection ---
-                variant_options = {v["title"]: v for v in variants}  # title -> variant
-                selected_colors = st.multiselect(
-                    "Select t-shirt colors to publish",
-                    options=list(variant_options.keys()),
-                    default=list(variant_options.keys())
+                st.info("Select desired colors (for reference in product description)")
+                color_input = st.text_input(
+                    "Enter colors separated by commas (e.g. Red, Black, White)",
+                    value="White"
                 )
-                if selected_colors:
-                    variants = [variant_options[color] for color in selected_colors]
-                else:
-                    st.error("No colors selected. Please select at least one color.")
+                selected_colors = [c.strip() for c in color_input.split(",") if c.strip()]
+                if not selected_colors:
+                    st.error("Please enter at least one color.")
                     st.stop()
 
             except requests.exceptions.HTTPError as e:
-                st.error(f"❌ Error fetching shop or blueprint: {e.response.text}")
+                st.error(f"❌ Error fetching shop: {e.response.text}")
                 st.stop()
 
             # --- Upload & Create Products ---
@@ -125,15 +111,16 @@ def main():
                     image_id = upload_image(file_obj)
 
                     product_title = os.path.splitext(file_obj.name)[0]
+                    product_description = f"High-quality Gildan 64000 tee. Selected colors: {', '.join(selected_colors)}"
+
                     st.info(f"Creating product: {product_title}...")
                     product = create_product(
                         shop_id,
                         BLUEPRINT_ID,
                         PROVIDER_ID,
                         f"{product_title} - Gildan 64000",
-                        "High-quality Gildan 64000 tee with centered design.",
-                        image_id,
-                        variants
+                        product_description,
+                        image_id
                     )
                     product_id = product["id"]
 
