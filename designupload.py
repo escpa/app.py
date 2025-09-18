@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Printify Choice, No Variants)")
+    st.title("📦 Gildan 64000 Printify Uploader (Fixed with Variants)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -41,11 +41,11 @@ def main():
         resp.raise_for_status()
         return resp.json()["id"]
 
-    def build_print_area(image_id):
-        """Create print area for Printify Choice."""
-        return [
+    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id, variant_ids):
+        """Create Printify product with variants and print area."""
+        print_areas = [
             {
-                "variant_ids": [],  # leave empty for Printify Choice
+                "variant_ids": variant_ids,
                 "placeholders": [
                     {
                         "position": "front",
@@ -54,16 +54,14 @@ def main():
                 ]
             }
         ]
-
-    def create_product(shop_id, blueprint_id, provider_id, title, description, image_id):
-        print_areas = build_print_area(image_id)
+        variants = [{"id": vid, "price": 0} for vid in variant_ids]  # price will be updated later
         url = f"https://api.printify.com/v1/shops/{shop_id}/products.json"
         body = {
             "title": title,
             "description": description,
             "blueprint_id": blueprint_id,
             "print_provider_id": provider_id,
-            "variants": [],  # no variants for Printify Choice
+            "variants": variants,
             "print_areas": print_areas
         }
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
@@ -89,10 +87,21 @@ def main():
                 if not shop_id:
                     st.stop()
 
+                # --- Fetch blueprint variants ---
+                headers = {"Authorization": f"Bearer {api_token}"}
+                bp_resp = requests.get(f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}.json", headers=headers)
+                bp_resp.raise_for_status()
+                blueprint_data = bp_resp.json()
+                variants = blueprint_data.get("variants", [])
+                enabled_variants = [v for v in variants if v.get("enabled", False)]
+                if not enabled_variants:
+                    st.error("No enabled variants found for this blueprint.")
+                    st.stop()
+
                 # --- Color Selection ---
-                st.info("Select desired colors (for reference in product description)")
+                variant_options = {v["title"]: v for v in enabled_variants}  # title -> variant
                 color_input = st.text_input(
-                    "Enter colors separated by commas (e.g. Red, Black, White)",
+                    "Enter desired colors (for reference in product description, e.g. Red, Black, White)",
                     value="White"
                 )
                 selected_colors = [c.strip() for c in color_input.split(",") if c.strip()]
@@ -100,8 +109,14 @@ def main():
                     st.error("Please enter at least one color.")
                     st.stop()
 
+                # Filter variants by selected colors (best-effort)
+                variant_ids = [v["id"] for title, v in variant_options.items() if any(color.lower() in title.lower() for color in selected_colors)]
+                if not variant_ids:
+                    st.warning("No variants exactly match the selected colors; using all enabled variants.")
+                    variant_ids = [v["id"] for v in enabled_variants]
+
             except requests.exceptions.HTTPError as e:
-                st.error(f"❌ Error fetching shop: {e.response.text}")
+                st.error(f"❌ Error fetching shop or blueprint: {e.response.text}")
                 st.stop()
 
             # --- Upload & Create Products ---
@@ -120,7 +135,8 @@ def main():
                         PROVIDER_ID,
                         f"{product_title} - Gildan 64000",
                         product_description,
-                        image_id
+                        image_id,
+                        variant_ids
                     )
                     product_id = product["id"]
 
