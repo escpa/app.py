@@ -5,9 +5,9 @@ import streamlit as st
 
 # -------------------- CONFIG: Hardcoded --------------------
 BLUEPRINT_ID = 145              # Gildan 64000
-PROVIDER_ID = 789               # Monster Digital (replace with actual ID from your shop)
+PROVIDER_ID = 789               # Monster Digital (replace with actual provider ID from your shop)
 VARIANT_IDS = [401, 402, 403, 404, 405, 406]  # Sizes S–3XL
-COLOR_IDS = [1, 2, 3]           # Example: White, Black, Red
+COLOR_IDS = [1, 2, 3]           # Colors: White, Black, Red (replace with actual IDs)
 VARIANT_PRICE = 2999             # $29.99 in cents
 SIZE_MAP = {401: "S", 402: "M", 403: "L", 404: "XL", 405: "2XL", 406: "3XL"}
 COLOR_MAP = {1: "White", 2: "Black", 3: "Red"}
@@ -40,6 +40,7 @@ def main():
         st.stop()
 
     # -------------------- SELECT SIZES & COLORS --------------------
+    # User can pick sizes and colors; you can hardcode defaults if you want
     selected_sizes = st.multiselect(
         "Select sizes to include",
         options=[SIZE_MAP[vid] for vid in VARIANT_IDS],
@@ -74,6 +75,7 @@ def main():
                 upload_resp.raise_for_status()
                 image_id = upload_resp.json()["id"]
 
+                # Loop through selected sizes and colors
                 for vid in selected_variant_ids:
                     for color_id in selected_color_ids:
                         product_title = os.path.splitext(file_obj.name)[0]
