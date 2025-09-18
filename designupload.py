@@ -5,11 +5,11 @@ import os, re, time, base64, hashlib, requests, streamlit as st
 API_BASE = "https://api.printify.com/v1"
 VARIANT_PRICE_CENTS = 2999          # $29.99
 WANTED_SIZES = ["S", "M", "L", "XL", "2XL", "3XL"]
-TITLE_SUFFIX = " - Selected Garment"
+TITLE_SUFFIX = " - Auto Uploader"
 CENTER_X, CENTER_Y, SCALE, ANGLE = 0.5, 0.5, 0.9, 0
 
 # ================== UI SETUP ==================
-st.set_page_config(page_title="Printify Auto Uploader — Blueprint/Provider Picker", page_icon="📦", layout="centered")
+st.set_page_config(page_title="Printify Auto Uploader", page_icon="📦", layout="centered")
 st.title("📦 Printify Auto Uploader")
 
 # ---- Token cleaning/diagnostics ----
@@ -27,18 +27,15 @@ def mask_token(t: str) -> str:
     if not t: return ""
     return f"{t[:6]}…{t[-6:]} (len={len(t)})" if len(t) > 12 else f"{t[:2]}…{t[-2:]} (len={len(t)})"
 
-def token_fingerprint(t: str) -> str:
+def token_fp(t: str) -> str:
     return hashlib.sha256(t.encode("utf-8")).hexdigest()[:8] if t else ""
 
 raw_token = st.text_input("Printify Merchant API Token", type="password",
                           help="Create in Printify → Settings → API tokens (Merchant token, not OAuth/publishable). Paste exactly.")
 api_token = clean_token(raw_token)
-st.caption(f"Token preview: {mask_token(api_token)}  •  sha256:{token_fingerprint(api_token)}")
+st.caption(f"Token preview: {mask_token(api_token)}  •  sha256:{token_fp(api_token)}")
 
-HEADERS = {
-    "Authorization": f"Bearer {api_token}" if api_token else "",
-    "Content-Type": "application/json",
-}
+HEADERS = {"Authorization": f"Bearer {api_token}" if api_token else "", "Content-Type": "application/json"}
 
 # ---- HTTP helpers with debug ----
 def api_get(path, params=None, retries=2, backoff=1.25, timeout=30):
@@ -48,10 +45,8 @@ def api_get(path, params=None, retries=2, backoff=1.25, timeout=30):
         if r.status_code == 429 and i < retries - 1:
             time.sleep(backoff * (i + 1)); continue
         if r.status_code >= 400:
-            # show exact URL that failed
-            st.error(f"HTTP {r.status_code} GET {url}  •  params={params}  •  body={r.text}")
+            st.error(f"HTTP {r.status_code} GET {url} • params={params} • body={r.text}")
             r.raise_for_status()
-        r.raise_for_status()
         return r
 
 def api_post(path, json=None, retries=2, backoff=1.25, timeout=30):
@@ -61,96 +56,110 @@ def api_post(path, json=None, retries=2, backoff=1.25, timeout=30):
         if r.status_code == 429 and i < retries - 1:
             time.sleep(backoff * (i + 1)); continue
         if r.status_code >= 400:
-            st.error(f"HTTP {r.status_code} POST {url}  •  json={json}  •  body={r.text}")
+            st.error(f"HTTP {r.status_code} POST {url} • json={json} • body={r.text}")
             r.raise_for_status()
-        r.raise_for_status()
         return r
 
 # ================== VERIFY TOKEN & SHOP ==================
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("🔑 Verify token"):
-        if not api_token:
-            st.error("Enter your Merchant API token first.")
-        else:
-            try:
-                r = api_get("/shops.json")
-                shops = r.json()
-                if not shops: st.warning("Token accepted, but no shops found on this account.")
-                else: st.success(f"✅ Token OK. Found {len(shops)} shop(s). Using: {shops[0].get('title', shops[0]['id'])}")
-            except requests.HTTPError:
-                pass
-with col2:
-    st.write("")
-
 if not api_token:
     st.info("Paste your **Merchant API** token to continue.")
     st.stop()
 
 try:
     shops = api_get("/shops.json").json()
-    if not shops:
-        st.error("Token valid, but no shops linked to this account.")
-        st.stop()
+    if not shops: st.error("Token valid, but no shops linked to this account."); st.stop()
     shop_id = shops[0]["id"]
     shop_title = shops[0].get("title", shop_id)
     st.caption(f"Connected to shop: {shop_title} ({shop_id})")
 except requests.HTTPError:
     st.stop()
 
-# ================== PICK BLUEPRINT (dynamic) ==================
+# ================== PICK BLUEPRINT ==================
 st.subheader("1) Choose a Blueprint (Garment)")
-# Pull all blueprints and let user search/select (some accounts have many; filter by keyword)
 try:
     all_blueprints = api_get("/catalog/blueprints.json").json()  # [{id, title, brand, model, ...}]
-    # Build readable labels like "Gildan 64000 (ID 145)"
-    labels = []
+    # readable label
+    bps = []
     for b in all_blueprints:
         brand = b.get("brand") or ""
         model = b.get("model") or ""
         title = b.get("title") or f"{brand} {model}".strip()
-        labels.append((f"{title}  •  {brand} {model}".strip(), b["id"]))
-    # sort alphabetically
-    labels.sort(key=lambda x: x[0].lower())
-    options = [f"{name}  (ID {bid})" for name, bid in labels]
+        label = f"{title} • {brand} {model}".strip()
+        bps.append((label, b["id"]))
+    bps.sort(key=lambda x: x[0].lower())
+    options = [f"{name}  (ID {bid})" for name, bid in bps]
+    # try preselect Gildan 64000 if present
     default_idx = 0
-    # try to preselect Gildan 64000 if present
-    for i, (name, bid) in enumerate(labels):
+    for i, (name, bid) in enumerate(bps):
         if "gildan" in name.lower() and "64000" in name.lower():
-            default_idx = i
-            break
+            default_idx = i; break
     chosen_bp_display = st.selectbox("Blueprint", options, index=default_idx)
-    BLUEPRINT_ID = int(chosen_bp_display.split("ID")[-1].strip(") ").strip())
-    st.caption(f"Using blueprint ID: {BLUEPRINT_ID}")
+    blueprint_id = int(chosen_bp_display.split("ID")[-1].strip(") ").strip())
+    st.caption(f"Using blueprint ID: {blueprint_id}")
 except requests.HTTPError:
     st.stop()
 
-# ================== PICK PROVIDER FOR BLUEPRINT ==================
-st.subheader("2) Choose a Print Provider for that Blueprint")
+# ================== FIND ONLY WORKING PROVIDERS FOR THIS BLUEPRINT ==================
+st.subheader("2) Choose a Print Provider that actually supports this blueprint")
+include_oos_scan = st.checkbox("Scan including out-of-stock variants", value=False)
+
+def probe_provider_variants(bpid: int, pid: int, include_oos=False):
+    params = {"show-out-of-stock": 1} if include_oos else None
+    try:
+        raw = api_get(f"/catalog/blueprints/{bpid}/print_providers/{pid}/variants.json", params=params).json()
+        # normalize a tiny sample just to count
+        cnt = 0
+        for v in raw:
+            size = v.get("title") or v.get("size") or ""
+            color = (v.get("options", {}).get("color", {}) or {}).get("title", "")
+            if size and color:
+                cnt += 1
+                if cnt > 0 and cnt >= 1:
+                    break
+        return True, cnt  # at least 1 variant parsed
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return False, 0
+        raise  # bubble up other errors
+
 try:
-    providers = api_get(f"/catalog/blueprints/{BLUEPRINT_ID}/print_providers.json").json()
+    providers = api_get(f"/catalog/blueprints/{blueprint_id}/print_providers.json").json()
     if not providers:
-        st.error("No print providers found for this blueprint. Try a different blueprint.")
+        st.error("No providers available for this blueprint.")
         st.stop()
-    provider_labels = [f"{p.get('title','?')} (ID {p['id']})" for p in providers]
+
+    # Probe each provider → keep only those that return variants (not 404)
+    working = []
+    for p in providers:
+        ok, cnt = probe_provider_variants(blueprint_id, p["id"], include_oos=include_oos_scan)
+        if ok:
+            working.append((p.get("title","?"), p["id"], cnt))
+
+    if not working:
+        st.error("No providers returned variants for this blueprint in your account/region. Try a different blueprint.")
+        st.stop()
+
+    provider_labels = [f"{name} (ID {pid})" for name, pid, cnt in working]
     # prefer Monster Digital if present
     default_idx = 0
-    for i, p in enumerate(providers):
-        if p.get("title","").lower() == "monster digital":
-            default_idx = i
-            break
+    for i, (name, pid, cnt) in enumerate(working):
+        if name.lower() == "monster digital":
+            default_idx = i; break
+
     chosen_provider_display = st.selectbox("Print Provider", provider_labels, index=default_idx)
     provider_id = int(chosen_provider_display.split("ID")[-1].strip(") "))
-    st.caption(f"Using provider ID: {provider_id}")
-except requests.HTTPError:
+    provider_name = chosen_provider_display.split(" (ID")[0]
+    st.caption(f"Using provider: {provider_name} (ID {provider_id})")
+except requests.HTTPError as e:
+    st.error(f"Error while listing providers: {e.response.text if e.response is not None else str(e)}")
     st.stop()
 
-# ================== FETCH VARIANTS (with 404 handling) ==================
-def fetch_catalog_variants(blueprint_id: int, provider_id: int, include_oos=False):
+# ================== FETCH ALL VARIANTS FROM THE CHOSEN PROVIDER ==================
+def fetch_catalog_variants(bpid: int, pid: int, include_oos=False):
     params = {"show-out-of-stock": 1} if include_oos else None
-    # show the actual URL for debugging
-    st.caption(f"Fetching variants from: /catalog/blueprints/{blueprint_id}/print_providers/{provider_id}/variants.json")
-    raw = api_get(f"/catalog/blueprints/{blueprint_id}/print_providers/{provider_id}/variants.json", params=params).json()
+    url = f"/catalog/blueprints/{bpid}/print_providers/{pid}/variants.json"
+    st.caption(f"Fetching variants from: {url}")
+    raw = api_get(url, params=params).json()
     norm = []
     for v in raw:
         size = v.get("title") or v.get("size") or ""
@@ -159,17 +168,15 @@ def fetch_catalog_variants(blueprint_id: int, provider_id: int, include_oos=Fals
         norm.append({"id": v["id"], "size": size, "color": color, "is_available": v.get("is_available", True)})
     return norm
 
-include_oos = st.checkbox("Show out-of-stock colors", value=False,
-                          help="For planning; OOS variants are skipped during creation.")
 try:
-    catalog = fetch_catalog_variants(BLUEPRINT_ID, provider_id, include_oos=include_oos)
-except requests.HTTPError as e:
+    catalog = fetch_catalog_variants(blueprint_id, provider_id, include_oos=include_oos_scan)
+except requests.HTTPError:
     st.stop()
 
 # ================== COLOR PICKER ==================
-available_colors = sorted({v["color"] for v in catalog if v["size"] in WANTED_SIZES and (include_oos or v["is_available"])})
+available_colors = sorted({v["color"] for v in catalog if v["size"] in WANTED_SIZES and (include_oos_scan or v["is_available"])})
 if not available_colors:
-    st.warning("No colors available for these sizes with this provider. Try another provider or toggle 'Show out-of-stock'.")
+    st.warning("No colors available for these sizes with this provider. Try another provider or toggle OOS scan.")
     st.stop()
 
 st.subheader("3) Select Colors (applies to ALL uploaded designs)")
@@ -215,8 +222,8 @@ if uploaded_files and st.button("🚀 Upload & Publish All"):
             colors_str = ", ".join(sorted({v["color"] for v in chosen_variants}))
             product_body = {
                 "title": f"{base_title}{TITLE_SUFFIX}",
-                "description": f"{chosen_provider_display.split(' (ID')[0]} • {chosen_bp_display.split('  (ID')[0]} — Colors: {colors_str}. Sizes: {sizes_str}.",
-                "blueprint_id": BLUEPRINT_ID,
+                "description": f"{provider_name} • {chosen_bp_display.split('  (ID')[0]} — Colors: {colors_str}. Sizes: {sizes_str}.",
+                "blueprint_id": blueprint_id,
                 "print_provider_id": provider_id,
                 "variants": [{"id": v["id"], "price": VARIANT_PRICE_CENTS} for v in chosen_variants],
                 "print_areas": [{
