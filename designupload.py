@@ -15,13 +15,10 @@ def main():
     )
     markup = st.number_input("Markup in cents (e.g. 1000 = $10)", min_value=0, value=1000)
 
-    # --- Constants for Gildan 64000 ---
-    BLUEPRINT_ID = 57       # Gildan 64000 (verify with Printify Catalog)
-    PRINT_PROVIDER_ID = 18  # Example provider, verify in Printify
+    BLUEPRINT_ID = 57  # Gildan 64000
 
     # --- Helper Functions ---
     def get_shop_id():
-        """Fetches the Printify Shop ID using the API token."""
         headers = {"Authorization": f"Bearer {api_token}"}
         resp = requests.get("https://api.printify.com/v1/shops.json", headers=headers)
         resp.raise_for_status()
@@ -29,10 +26,33 @@ def main():
         if not shops:
             st.error("No shops found for this API token.")
             return None
-        return shops[0]["id"]  # Use the first shop
+        return shops[0]["id"]
+
+    def get_valid_provider(shop_id):
+        """
+        Fetches all providers for the blueprint and returns the first one with enabled variants.
+        """
+        headers = {"Authorization": f"Bearer {api_token}"}
+        resp = requests.get(
+            f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}/print_providers.json",
+            headers=headers
+        )
+        resp.raise_for_status()
+        providers = resp.json()
+        for p in providers:
+            # Check if this provider has variants enabled
+            provider_resp = requests.get(
+                f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}/print_providers/{p['id']}.json",
+                headers=headers
+            ).json()
+            enabled_variants = [v for v in provider_resp["variants"] if v["enabled"]]
+            if enabled_variants:
+                return p["id"], enabled_variants
+        st.error("No valid print providers found for Gildan 64000.")
+        return None, None
 
     def upload_image(file_obj):
-        """Uploads an image to Printify using base64 encoding."""
+        """Upload an image to Printify using base64 encoding."""
         url = "https://api.printify.com/v1/uploads/images.json"
         file_bytes = file_obj.read()
         encoded = base64.b64encode(file_bytes).decode("utf-8")
@@ -44,14 +64,6 @@ def main():
         resp = requests.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         return resp.json()["id"]
-
-    def get_variants(shop_id):
-        headers = {"Authorization": f"Bearer {api_token}"}
-        url = f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}/print_providers/{PRINT_PROVIDER_ID}.json"
-        resp = requests.get(url, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        return [{"id": v["id"], "price": v["cost"] + markup} for v in data["variants"] if v["enabled"]]
 
     def build_print_area(image_id, variants):
         return [
@@ -68,16 +80,15 @@ def main():
             }
         ]
 
-    def create_product(shop_id, title, description, image_id):
-        variants = get_variants(shop_id)
+    def create_product(shop_id, provider_id, title, description, image_id, variants):
         print_areas = build_print_area(image_id, variants)
         url = f"https://api.printify.com/v1/shops/{shop_id}/products.json"
         body = {
             "title": title,
             "description": description,
             "blueprint_id": BLUEPRINT_ID,
-            "print_provider_id": PRINT_PROVIDER_ID,
-            "variants": variants,
+            "print_provider_id": provider_id,
+            "variants": [{"id": v["id"], "price": v["cost"] + markup} for v in variants],
             "print_areas": print_areas
         }
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
@@ -110,8 +121,11 @@ def main():
                 shop_id = get_shop_id()
                 if not shop_id:
                     st.stop()
+                provider_id, variants = get_valid_provider(shop_id)
+                if not provider_id or not variants:
+                    st.stop()
             except requests.exceptions.HTTPError as e:
-                st.error(f"❌ Error fetching Shop ID: {e.response.text}")
+                st.error(f"❌ Error fetching Shop ID or provider: {e.response.text}")
                 st.stop()
 
             for file_obj in uploaded_files:
@@ -123,9 +137,11 @@ def main():
                     st.info(f"Creating product: {product_title}...")
                     product = create_product(
                         shop_id,
+                        provider_id,
                         f"{product_title} - Gildan 64000",
                         "High-quality Gildan 64000 tee with centered design.",
-                        image_id
+                        image_id,
+                        variants
                     )
                     product_id = product["id"]
 
