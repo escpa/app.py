@@ -3,12 +3,11 @@ import base64
 import requests
 import streamlit as st
 
-# Hardcoded product settings
+# Hardcoded blueprint and provider
 BLUEPRINT_ID = 145  # Gildan 64000
 PROVIDER_ID = 0     # Printify Choice
 VARIANT_PRICE = 2999  # $29.99 in cents
 
-# Map variant IDs to friendly size names (for user selection)
 SIZE_MAP = {
     401: "S",
     402: "M",
@@ -26,43 +25,52 @@ def main():
         "Upload design files (PNG/JPG)", type=["png", "jpg", "jpeg"], accept_multiple_files=True
     )
 
-    color_input = st.text_input(
-        "Enter desired colors (for description)", value="White"
-    )
+    color_input = st.text_input("Enter desired colors (for description)", value="White")
     selected_colors_text = [c.strip() for c in color_input.split(",") if c.strip()]
 
-    if st.button("Upload & Publish"):
-        if not api_token or not uploaded_files:
-            st.error("Please enter API token and upload at least one design.")
-            st.stop()
+    if not api_token or not uploaded_files:
+        st.info("Enter your API token and upload at least one design to enable uploading.")
+        st.stop()
 
+    if st.button("Upload & Publish"):
         headers = {"Authorization": f"Bearer {api_token}"}
 
         # --- Get Shop ID ---
-        resp = requests.get("https://api.printify.com/v1/shops.json", headers=headers)
-        resp.raise_for_status()
-        shops = resp.json()
-        if not shops:
-            st.error("No shops found for this API token.")
+        try:
+            resp = requests.get("https://api.printify.com/v1/shops.json", headers=headers)
+            resp.raise_for_status()
+            shops = resp.json()
+            if not shops:
+                st.error("No shops found for this API token.")
+                st.stop()
+            shop_id = shops[0]["id"]
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ HTTP error fetching shops: {e.response.status_code} - {e.response.text}")
             st.stop()
-        shop_id = shops[0]["id"]
-
-        # --- Fetch enabled variants for blueprint + provider ---
-        variants_resp = requests.get(
-            f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}/print_providers/{PROVIDER_ID}.json",
-            headers=headers
-        )
-        if variants_resp.status_code != 200:
-            st.error(f"Failed to fetch provider variants: {variants_resp.text}")
-            st.stop()
-        variants_data = variants_resp.json().get("variants", [])
-        enabled_variants = [v for v in variants_data if v.get("enabled")]
-
-        if not enabled_variants:
-            st.error("No enabled variants found for this blueprint with Printify Choice.")
+        except Exception as e:
+            st.error(f"❌ Unexpected error fetching shops: {e}")
             st.stop()
 
-        # Let user select which sizes
+        # --- Fetch enabled variants ---
+        try:
+            variants_resp = requests.get(
+                f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}/print_providers/{PROVIDER_ID}.json",
+                headers=headers
+            )
+            variants_resp.raise_for_status()
+            variants_data = variants_resp.json().get("variants", [])
+            enabled_variants = [v for v in variants_data if v.get("enabled")]
+            if not enabled_variants:
+                st.error("No enabled variants found for this blueprint with Printify Choice.")
+                st.stop()
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ HTTP error fetching variants: {e.response.status_code} - {e.response.text}")
+            st.stop()
+        except Exception as e:
+            st.error(f"❌ Unexpected error fetching variants: {e}")
+            st.stop()
+
+        # Let user select sizes
         enabled_variant_ids = [v["id"] for v in enabled_variants if v["id"] in SIZE_MAP]
         selected_sizes = st.multiselect(
             "Select sizes to include",
@@ -76,20 +84,28 @@ def main():
 
         # --- Upload & Create Products ---
         for file_obj in uploaded_files:
-            st.info(f"Uploading {file_obj.name}...")
+            try:
+                st.info(f"Uploading {file_obj.name}...")
 
-            # Safe image upload
-            file_bytes = file_obj.read()
-            file_obj.seek(0)
-            encoded = base64.b64encode(file_bytes).decode("utf-8")
-            upload_payload = {"file_name": file_obj.name, "contents": encoded}
-            upload_resp = requests.post(
-                "https://api.printify.com/v1/uploads/images.json",
-                headers=headers,
-                json=upload_payload
-            )
-            upload_resp.raise_for_status()
-            image_id = upload_resp.json()["id"]
+                # Safe image upload
+                file_bytes = file_obj.read()
+                file_obj.seek(0)
+                encoded = base64.b64encode(file_bytes).decode("utf-8")
+                upload_payload = {"file_name": file_obj.name, "contents": encoded}
+                upload_resp = requests.post(
+                    "https://api.printify.com/v1/uploads/images.json",
+                    headers=headers,
+                    json=upload_payload
+                )
+                upload_resp.raise_for_status()
+                image_id = upload_resp.json()["id"]
+
+            except requests.exceptions.HTTPError as e:
+                st.error(f"❌ HTTP error uploading {file_obj.name}: {e.response.status_code} - {e.response.text}")
+                continue
+            except Exception as e:
+                st.error(f"❌ Unexpected error uploading {file_obj.name}: {e}")
+                continue
 
             # Create product
             product_title = os.path.splitext(file_obj.name)[0]
@@ -99,7 +115,10 @@ def main():
                 {
                     "variant_ids": final_variant_ids,
                     "placeholders": [
-                        {"position": "front", "images": [{"id": image_id, "x": 0.5, "y": 0.0, "scale": 0.9, "angle": 0}]}
+                        {
+                            "position": "front",
+                            "images": [{"id": image_id, "x": 0.5, "y": 0.0, "scale": 0.9, "angle": 0}]
+                        }
                     ]
                 }
             ]
@@ -114,25 +133,37 @@ def main():
                 "print_areas": print_areas
             }
 
-            st.info(f"Creating product: {product_title}...")
-            product_resp = requests.post(
-                f"https://api.printify.com/v1/shops/{shop_id}/products.json",
-                headers=headers,
-                json=product_body
-            )
-            product_resp.raise_for_status()
-            product_id = product_resp.json()["id"]
+            try:
+                st.info(f"Creating product: {product_title}...")
+                product_resp = requests.post(
+                    f"https://api.printify.com/v1/shops/{shop_id}/products.json",
+                    headers=headers,
+                    json=product_body
+                )
+                product_resp.raise_for_status()
+                product_id = product_resp.json()["id"]
+
+            except requests.exceptions.HTTPError as e:
+                st.error(f"❌ HTTP error creating product {file_obj.name}: {e.response.status_code} - {e.response.text}")
+                continue
+            except Exception as e:
+                st.error(f"❌ Unexpected error creating product {file_obj.name}: {e}")
+                continue
 
             # Publish
-            st.info(f"Publishing product: {product_title}...")
-            publish_resp = requests.post(
-                f"https://api.printify.com/v1/shops/{shop_id}/products/{product_id}/publish.json",
-                headers=headers,
-                json={"title": True, "description": True, "images": True, "variants": True}
-            )
-            publish_resp.raise_for_status()
-
-            st.success(f"✅ {product_title} published! Product ID: {product_id}")
+            try:
+                st.info(f"Publishing product: {product_title}...")
+                publish_resp = requests.post(
+                    f"https://api.printify.com/v1/shops/{shop_id}/products/{product_id}/publish.json",
+                    headers=headers,
+                    json={"title": True, "description": True, "images": True, "variants": True}
+                )
+                publish_resp.raise_for_status()
+                st.success(f"✅ {product_title} published! Product ID: {product_id}")
+            except requests.exceptions.HTTPError as e:
+                st.error(f"❌ HTTP error publishing {file_obj.name}: {e.response.status_code} - {e.response.text}")
+            except Exception as e:
+                st.error(f"❌ Unexpected error publishing {file_obj.name}: {e}")
 
 if __name__ == "__main__":
     main()
