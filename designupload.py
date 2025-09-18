@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Printify Choice, No Variants)")
+    st.title("📦 Gildan 64000 Printify Uploader (S–3XL)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -18,6 +18,9 @@ def main():
     # --- Hardcoded blueprint and provider ---
     BLUEPRINT_ID = 145  # Gildan 64000
     PROVIDER_ID = 0     # Printify Choice
+
+    # --- Hardcoded variant IDs S → 3XL ---
+    VARIANT_IDS = [401, 402, 403, 404, 405, 406]  # S, M, L, XL, 2XL, 3XL
 
     # --- Helper Functions ---
     def get_shop_id():
@@ -42,10 +45,10 @@ def main():
         return resp.json()["id"]
 
     def create_product(shop_id, blueprint_id, provider_id, title, description, image_id):
-        """Create product using Printify Choice (no variants)."""
+        """Create product using Printify Choice with hardcoded S–3XL variants."""
         print_areas = [
             {
-                "variant_ids": [],  # leave empty for Printify Choice
+                "variant_ids": VARIANT_IDS,
                 "placeholders": [
                     {
                         "position": "front",
@@ -54,12 +57,13 @@ def main():
                 ]
             }
         ]
+        variants = [{"id": vid, "price": 0} for vid in VARIANT_IDS]  # price updated later
         body = {
             "title": title,
             "description": description,
             "blueprint_id": blueprint_id,
             "print_provider_id": provider_id,
-            "variants": [],  # no variants required for Printify Choice
+            "variants": variants,
             "print_areas": print_areas
         }
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
