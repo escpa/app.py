@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader with Color Selection")
+    st.title("📦 Gildan 64000 Printify Uploader (Hardcoded Blueprint)")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -14,6 +14,9 @@ def main():
         accept_multiple_files=True
     )
     markup = st.number_input("Markup in cents (e.g. 1000 = $10)", min_value=0, value=1000)
+
+    # --- Hardcoded Gildan 64000 Blueprint ---
+    BLUEPRINT_ID = 145  # Gildan 64000
 
     # --- Helper Functions ---
     def get_shop_id():
@@ -25,19 +28,6 @@ def main():
             st.error("No shops found for this API token.")
             return None
         return shops[0]["id"]
-
-    def get_gildan_blueprint():
-        """Find the Gildan 64000 blueprint dynamically."""
-        headers = {"Authorization": f"Bearer {api_token}"}
-        resp = requests.get("https://api.printify.com/v1/catalog/blueprints.json", headers=headers)
-        resp.raise_for_status()
-        blueprints = resp.json()
-        for bp in blueprints:
-            title_lower = bp["title"].lower().replace("-", " ").replace("_", " ")
-            if "gildan" in title_lower and "64000" in title_lower:
-                return bp["id"]
-        st.error("Gildan 64000 blueprint not found in your account.")
-        return None
 
     def get_valid_provider(blueprint_id):
         """Select a provider with enabled variants."""
@@ -118,10 +108,7 @@ def main():
                 shop_id = get_shop_id()
                 if not shop_id:
                     st.stop()
-                blueprint_id = get_gildan_blueprint()
-                if not blueprint_id:
-                    st.stop()
-                provider_id, variants = get_valid_provider(blueprint_id)
+                provider_id, variants = get_valid_provider(BLUEPRINT_ID)
                 if not provider_id or not variants:
                     st.stop()
 
@@ -139,7 +126,7 @@ def main():
                     st.stop()
 
             except requests.exceptions.HTTPError as e:
-                st.error(f"❌ Error fetching Shop ID, blueprint, or provider: {e.response.text}")
+                st.error(f"❌ Error fetching Shop ID or provider: {e.response.text}")
                 st.stop()
 
             for file_obj in uploaded_files:
@@ -151,7 +138,7 @@ def main():
                     st.info(f"Creating product: {product_title}...")
                     product = create_product(
                         shop_id,
-                        blueprint_id,
+                        BLUEPRINT_ID,
                         provider_id,
                         f"{product_title} - Gildan 64000",
                         "High-quality Gildan 64000 tee with centered design.",
