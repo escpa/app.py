@@ -8,7 +8,6 @@ def main():
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
-    shop_id = st.text_input("Printify Shop ID")
     uploaded_files = st.file_uploader(
         "Upload design files (PNG/JPG)", 
         type=["png", "jpg", "jpeg"], 
@@ -20,20 +19,24 @@ def main():
     BLUEPRINT_ID = 57       # Gildan 64000 (verify with Printify Catalog)
     PRINT_PROVIDER_ID = 18  # Example provider, verify in Printify
 
-    HEADERS = {"Authorization": f"Bearer {api_token}"}
-
     # --- Helper Functions ---
+    def get_shop_id():
+        """Fetches the Printify Shop ID using the API token."""
+        headers = {"Authorization": f"Bearer {api_token}"}
+        resp = requests.get("https://api.printify.com/v1/shops.json", headers=headers)
+        resp.raise_for_status()
+        shops = resp.json()
+        if not shops:
+            st.error("No shops found for this API token.")
+            return None
+        return shops[0]["id"]  # Use the first shop
+
     def upload_image(file_obj):
-        """
-        Uploads an image to Printify using base64 encoding.
-        """
+        """Uploads an image to Printify using base64 encoding."""
         url = "https://api.printify.com/v1/uploads/images.json"
         file_bytes = file_obj.read()
         encoded = base64.b64encode(file_bytes).decode("utf-8")
-        payload = {
-            "file_name": file_obj.name,
-            "contents": encoded
-        }
+        payload = {"file_name": file_obj.name, "contents": encoded}
         headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json"
@@ -42,9 +45,10 @@ def main():
         resp.raise_for_status()
         return resp.json()["id"]
 
-    def get_variants():
+    def get_variants(shop_id):
+        headers = {"Authorization": f"Bearer {api_token}"}
         url = f"https://api.printify.com/v1/catalog/blueprints/{BLUEPRINT_ID}/print_providers/{PRINT_PROVIDER_ID}.json"
-        resp = requests.get(url, headers=HEADERS)
+        resp = requests.get(url, headers=headers)
         resp.raise_for_status()
         data = resp.json()
         return [{"id": v["id"], "price": v["cost"] + markup} for v in data["variants"] if v["enabled"]]
@@ -64,8 +68,8 @@ def main():
             }
         ]
 
-    def create_product(title, description, image_id):
-        variants = get_variants()
+    def create_product(shop_id, title, description, image_id):
+        variants = get_variants(shop_id)
         print_areas = build_print_area(image_id, variants)
         url = f"https://api.printify.com/v1/shops/{shop_id}/products.json"
         body = {
@@ -76,11 +80,12 @@ def main():
             "variants": variants,
             "print_areas": print_areas
         }
-        resp = requests.post(url, headers={**HEADERS, "Content-Type": "application/json"}, json=body)
+        headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+        resp = requests.post(url, headers=headers, json=body)
         resp.raise_for_status()
         return resp.json()
 
-    def publish_product(product_id):
+    def publish_product(shop_id, product_id):
         url = f"https://api.printify.com/v1/shops/{shop_id}/products/{product_id}/publish.json"
         body = {
             "title": True,
@@ -91,15 +96,24 @@ def main():
             "keyFeatures": True,
             "shipping_template": True
         }
-        resp = requests.post(url, headers={**HEADERS, "Content-Type": "application/json"}, json=body)
+        headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+        resp = requests.post(url, headers=headers, json=body)
         resp.raise_for_status()
         return resp.json()
 
-    # --- Main Upload & Publish Button ---
+    # --- Main Upload & Publish ---
     if st.button("Upload & Publish"):
-        if not api_token or not shop_id or not uploaded_files:
-            st.error("Please enter API token, Shop ID, and upload at least one design.")
+        if not api_token or not uploaded_files:
+            st.error("Please enter API token and upload at least one design.")
         else:
+            try:
+                shop_id = get_shop_id()
+                if not shop_id:
+                    st.stop()
+            except requests.exceptions.HTTPError as e:
+                st.error(f"❌ Error fetching Shop ID: {e.response.text}")
+                st.stop()
+
             for file_obj in uploaded_files:
                 try:
                     st.info(f"Uploading {file_obj.name}...")
@@ -108,6 +122,7 @@ def main():
                     product_title = os.path.splitext(file_obj.name)[0]
                     st.info(f"Creating product: {product_title}...")
                     product = create_product(
+                        shop_id,
                         f"{product_title} - Gildan 64000",
                         "High-quality Gildan 64000 tee with centered design.",
                         image_id
@@ -115,7 +130,7 @@ def main():
                     product_id = product["id"]
 
                     st.info(f"Publishing product: {product_title}...")
-                    publish_product(product_id)
+                    publish_product(shop_id, product_id)
 
                     st.success(f"✅ {product_title} published! Product ID: {product_id}")
 
