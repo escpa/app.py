@@ -23,11 +23,15 @@ def main():
 
     # --- Helper Functions ---
     def upload_image(file_obj):
+        """
+        Uploads an image to Printify correctly using multipart/form-data.
+        """
         url = "https://api.printify.com/v1/uploads/images.json"
-        # Explicit MIME type
-        mime_type = "image/png" if file_obj.name.lower().endswith(".png") else "image/jpeg"
-        files = {"file": (file_obj.name, file_obj.getvalue(), mime_type)}
-        resp = requests.post(url, headers={"Authorization": f"Bearer {api_token}"}, files=files)
+        file_bytes = file_obj.read()
+        files = {
+            "file": (file_obj.name, file_bytes)
+        }
+        resp = requests.post(url, headers=HEADERS, files=files)
         resp.raise_for_status()
         return resp.json()["id"]
 
@@ -115,3 +119,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
