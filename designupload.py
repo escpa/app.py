@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader")
+    st.title("📦 Gildan 64000 Printify Uploader with Color Selection")
 
     # --- User Inputs ---
     api_token = st.text_input("Printify API Token", type="password")
@@ -27,18 +27,20 @@ def main():
         return shops[0]["id"]
 
     def get_gildan_blueprint():
+        """Find the Gildan 64000 blueprint dynamically."""
         headers = {"Authorization": f"Bearer {api_token}"}
         resp = requests.get("https://api.printify.com/v1/catalog/blueprints.json", headers=headers)
         resp.raise_for_status()
         blueprints = resp.json()
-        # Find Gildan 64000
         for bp in blueprints:
-            if "gildan 64000" in bp["title"].lower():
+            title_lower = bp["title"].lower().replace("-", " ").replace("_", " ")
+            if "gildan" in title_lower and "64000" in title_lower:
                 return bp["id"]
         st.error("Gildan 64000 blueprint not found in your account.")
         return None
 
     def get_valid_provider(blueprint_id):
+        """Select a provider with enabled variants."""
         headers = {"Authorization": f"Bearer {api_token}"}
         resp = requests.get(
             f"https://api.printify.com/v1/catalog/blueprints/{blueprint_id}/print_providers.json",
@@ -47,7 +49,6 @@ def main():
         resp.raise_for_status()
         providers = resp.json()
         for p in providers:
-            # Check enabled variants
             provider_resp = requests.get(
                 f"https://api.printify.com/v1/catalog/blueprints/{blueprint_id}/print_providers/{p['id']}.json",
                 headers=headers
@@ -59,6 +60,7 @@ def main():
         return None, None
 
     def upload_image(file_obj):
+        """Upload an image to Printify using base64."""
         url = "https://api.printify.com/v1/uploads/images.json"
         file_bytes = file_obj.read()
         encoded = base64.b64encode(file_bytes).decode("utf-8")
@@ -101,15 +103,7 @@ def main():
 
     def publish_product(shop_id, product_id):
         url = f"https://api.printify.com/v1/shops/{shop_id}/products/{product_id}/publish.json"
-        body = {
-            "title": True,
-            "description": True,
-            "images": True,
-            "variants": True,
-            "tags": True,
-            "keyFeatures": True,
-            "shipping_template": True
-        }
+        body = {"title": True, "description": True, "images": True, "variants": True}
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
         resp = requests.post(url, headers=headers, json=body)
         resp.raise_for_status()
@@ -130,6 +124,20 @@ def main():
                 provider_id, variants = get_valid_provider(blueprint_id)
                 if not provider_id or not variants:
                     st.stop()
+
+                # --- Color Selection ---
+                variant_options = {v["title"]: v for v in variants}  # title -> variant
+                selected_colors = st.multiselect(
+                    "Select t-shirt colors to publish",
+                    options=list(variant_options.keys()),
+                    default=list(variant_options.keys())
+                )
+                if selected_colors:
+                    variants = [variant_options[color] for color in selected_colors]
+                else:
+                    st.error("No colors selected. Please select at least one color.")
+                    st.stop()
+
             except requests.exceptions.HTTPError as e:
                 st.error(f"❌ Error fetching Shop ID, blueprint, or provider: {e.response.text}")
                 st.stop()
