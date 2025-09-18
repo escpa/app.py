@@ -3,20 +3,18 @@ import base64
 import requests
 import streamlit as st
 
-# -------------------- CONFIG: Hardcoded for your test product --------------------
+# -------------------- CONFIG: Hardcoded --------------------
 BLUEPRINT_ID = 145              # Gildan 64000
-PROVIDER_ID = 123               # Replace with your working provider ID from test product
-VARIANT_IDS = [401, 402, 403, 404, 405, 406]  # S–3XL
-COLOR_IDS = [1, 2, 3]           # Replace with numeric color IDs you want
+PROVIDER_ID = 789               # Monster Digital (replace with actual ID from your shop)
+VARIANT_IDS = [401, 402, 403, 404, 405, 406]  # Sizes S–3XL
+COLOR_IDS = [1, 2, 3]           # Example: White, Black, Red
 VARIANT_PRICE = 2999             # $29.99 in cents
 SIZE_MAP = {401: "S", 402: "M", 403: "L", 404: "XL", 405: "2XL", 406: "3XL"}
-COLOR_MAP = {1: "White", 2: "Black", 3: "Red"}  # Update according to your shop colors
+COLOR_MAP = {1: "White", 2: "Black", 3: "Red"}
 
-# -------------------- STREAMLIT APP --------------------
 def main():
-    st.title("📦 Gildan 64000 Printify Uploader (Hardcoded)")
+    st.title("📦 Gildan 64000 Printify Uploader (Monster Digital Only)")
 
-    # API Token input
     api_token = st.text_input("Printify API Token", type="password")
     uploaded_files = st.file_uploader(
         "Upload design files (PNG/JPG)", type=["png", "jpg", "jpeg"], accept_multiple_files=True
@@ -76,7 +74,6 @@ def main():
                 upload_resp.raise_for_status()
                 image_id = upload_resp.json()["id"]
 
-                # Loop through each variant and color
                 for vid in selected_variant_ids:
                     for color_id in selected_color_ids:
                         product_title = os.path.splitext(file_obj.name)[0]
